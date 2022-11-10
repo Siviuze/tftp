@@ -5,6 +5,8 @@
 #include <vector>
 #include <array>
 #include <string>
+#include <cstring>
+#include <charconv>
 #include <iostream>
 
 namespace tftp
@@ -63,15 +65,15 @@ namespace tftp
     struct Option
     {
         char const* name;
-        uint32_t value;
-        uint32_t min;
-        uint32_t max;
+        int64_t value;
+        int64_t min;
+        int64_t max;
         bool is_enable{false};
     };
-    constexpr Option BLKSIZE    = {"blksize",     512, 8, 65464      };
-    constexpr Option WINDOWSIZE = {"windowsize",  1,   1, 65535      };
+    constexpr Option BLKSIZE    = {"blksize",     512, 8, 8192       };
+    constexpr Option WINDOWSIZE = {"windowsize",  1,   1, 64         };
     constexpr Option TIMEOUT    = {"timeout",     1,   5, 255        };
-    constexpr Option TSIZE      = {"tsize",       0,   0, UINT32_MAX };
+    constexpr Option TSIZE      = {"tsize",       0,   0, INT64_MAX  };
 
     struct Request
     {
@@ -105,7 +107,7 @@ namespace tftp
     };
 
 
-    // basic helpers
+    // data management helpers
     template<typename T>
     T hton(T value)
     {
@@ -131,17 +133,22 @@ namespace tftp
         uint8_t const* data_end   = data_begin + sizeof(T);
         buffer.insert(buffer.end(), data_begin, data_end);
     }
-    template<>  void insert<char const*>(std::vector<char>& buffer, char const*const& data);
+    template<> void insert<char const*>(std::vector<char>& buffer, char const* const& str);
+    template<> void insert<std::string>(std::vector<char>& buffer, std::string const& str);
+
+    size_t maxSize(char const* data, size_t size, char const* current_pos);
+    size_t entryLen(char const* data, size_t size, char const* current_pos);
+    bool extractOption(char const* data, size_t size, Request& req, char const*& position);
 
     // Protocol management
     int parseRequest(char const* data, size_t size, Request& request);
-    std::vector<char> forgeRequest(Request const& request);   //TODO
+    std::vector<char> forgeRequest(Request const& request);
 
-    int parseOptionAck(char const* data, size_t size, Request& request); //TODO
+    int parseOptionAck(char const* data, size_t size, Request& request);
     std::vector<char> forgeOptionAck(Request const& request);
 
     bool isLastDataPacket(size_t size, Request const& request); //< size of the whole packet
-    int parseData(char const* data, size_t size, std::ostream& output);
+    int parseData(char const* data, size_t size);
     std::vector<char> forgeData(Request const& request, int block, std::istream& input);
 
     int parseAck(char const* data, size_t size);

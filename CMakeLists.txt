@@ -30,6 +30,13 @@ set_target_properties(tftp PROPERTIES
 
 add_executable(test examples/main.cc)
 target_link_libraries(test tftp)
+set_target_properties(test PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED YES
+  CXX_EXTENSIONS NO
+  POSITION_INDEPENDENT_CODE ON
+  COMPILE_FLAGS ${WARNINGS_FLAGS}
+)
 
 #option(BUILD_UNIT_TESTS "Build unit tests" ON)
 #if (BUILD_UNIT_TESTS)

@@ -21,7 +21,7 @@ public:
         {
             throw std::system_error(errno, std::generic_category());
         }
-        
+
     }
 
     void setTimeout(std::chrono::seconds timeout) override
@@ -58,7 +58,7 @@ int main()
     struct sockaddr_in6 server_addr, client_addr;
     char client_message[2000];
     socklen_t client_struct_length = sizeof(client_addr);
-    
+
     // Create UDP socket:
     int fd = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
     if (fd < 0)
@@ -67,12 +67,12 @@ int main()
         return -1;
     }
     printf("Socket created successfully\n");
-    
+
     // Set port and IP:
     server_addr.sin6_family = AF_INET6;
     server_addr.sin6_port = htons(69);
     server_addr.sin6_addr = in6addr_any;
-    
+
     // Bind to the set port and IP:
     if (bind(fd, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0)
     {
@@ -80,7 +80,7 @@ int main()
         return -1;
     }
     printf("Listening for incoming messages...\n\n");
-    
+
     // Receive client's message:
     while (true)
     {
@@ -90,7 +90,7 @@ int main()
             perror("Couldn't receive\n");
             return -1;
         }
-        printf("Received %d bytes from IP: TODO and port: %i\n", rec, ntohs(client_addr.sin6_port));
+        printf("Received %ld bytes from IP: TODO and port: %i\n", rec, ntohs(client_addr.sin6_port));
 
         // Parse
         tftp::Request request;
@@ -102,7 +102,7 @@ int main()
         }
         printf("opcode      : %x\n",   request.operation);
         printf("mode        : %s\n",   toString(request.mode));
-        printf("filename    : %.*s\n", request.filename.length(), request.filename.data());
+        printf("filename    : %s\n", request.filename.c_str());
         for (auto const& option : request.supported_options)
         {
             printf("%-12s: %-4d (%d)\n", option->name, option->value, option->is_enable);
@@ -132,7 +132,7 @@ int main()
             {
                 // send OACK
                 transferSocket.write(reply.data(), reply.size());
-                
+
                 // wait for OACK ack (0)
                 char ack[4];
                 transferSocket.read(ack, 4);
@@ -155,9 +155,9 @@ int main()
         std::cout << "Transfer " << file_size << "MB in " << elapsed << "s" << std::endl;
         std::cout << "-> " << file_size / elapsed << "MB/s" << std::endl;
     }
-    
+
     // Close the socket:
     close(fd);
-    
+
     return 0;
 }

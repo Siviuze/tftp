@@ -1,8 +1,5 @@
 #include "protocol.h"
 
-#include <cstring>
-#include <string>
-#include <charconv>
 #include <functional>
 
 namespace tftp
@@ -26,14 +23,63 @@ namespace tftp
     }
 
 
-    template<> void insert<char const*>(std::vector<char>& buffer, char const*const& data)
+    template<> void insert<char const*>(std::vector<char>& buffer, char const*const& str)
     {
-        uint8_t const* data_begin = reinterpret_cast<uint8_t const*>(data);
-        uint8_t const* data_end   = data_begin + strlen(data);
+        char const* data_begin = str;
+        char const* data_end   = str + strlen(str);
         buffer.insert(buffer.end(), data_begin, data_end);
 
-        uint8_t const str_end = 0;
+        char const str_end = 0;
         buffer.insert(buffer.end(), str_end);
+    }
+
+
+    template<> void insert<std::string>(std::vector<char>& buffer, std::string const& str)
+    {
+        char const* data_begin = str.data();
+        char const* data_end   = str.data() + str.size();
+        buffer.insert(buffer.end(), data_begin, data_end);
+
+        char const str_end = 0;
+        buffer.insert(buffer.end(), str_end);
+    }
+
+
+    size_t maxSize(char const* data, size_t size, char const* current_pos)
+    {
+        return size - (current_pos - data);
+    }
+
+
+    size_t entryLen(char const* data, size_t size, char const* current_pos)
+    {
+        return strnlen(current_pos, maxSize(data, size, current_pos)) + 1;
+    }
+
+
+    bool extractOption(char const* data, size_t size, Request& req, char const*& position)
+    {
+        for (auto option : req.supported_options)
+        {
+            if (strncasecmp(option->name, position, maxSize(data, size, position)) == 0)
+            {
+                position += entryLen(data, size, position);
+
+                size_t len = entryLen(data, size, position);
+                auto result = std::from_chars(position, position + len, option->value);
+                position += len;
+
+                if (result.ec != std::errc())
+                {
+                    return false;
+                }
+
+                option->value = std::clamp(option->value, option->min, option->max);
+                option->is_enable = true;
+                return true;
+            }
+        }
+        return false;
     }
 
 
@@ -47,36 +93,6 @@ namespace tftp
         }
         char const* pos = data;
 
-        // Helpers
-        auto maxSize  = [&]() { return size - (pos - data);         };
-        auto entryLen = [&]() { return strnlen(pos, maxSize()) + 1; };
-
-        auto extractOption = [&](Request& req, char const*& position)
-        {
-            for (auto option : req.supported_options)
-            {
-                if (strncasecmp(option->name, position, maxSize()) == 0)
-                {
-                    position += entryLen();
-
-                    size_t len = entryLen();
-                    auto result = std::from_chars(position, position + len, option->value);
-                    position += len;
-
-                    if (result.ec != std::errc())
-                    {
-                        return false;
-                    }
-
-                    option->value = std::clamp(option->value, option->min, option->max);
-                    option->is_enable = true;
-                    return true;
-                }
-            }
-            return false;
-        };
-
-
         request.operation = hton(*reinterpret_cast<uint16_t const*>(pos));
         if ((request.operation != opcode::RRQ) and (request.operation != opcode::WRQ))
         {
@@ -87,13 +103,13 @@ namespace tftp
         pos += 2;
 
         // Extract file name (always first)
-        std::size_t len = entryLen();
+        std::size_t len = entryLen(data, size, pos);
         request.filename = std::string(pos, len);
         pos += len;
 
         // Extract mode
         char const* mode_str = pos;
-        size_t max_size = maxSize();
+        size_t max_size = maxSize(data, size, pos);
         for (Mode mode = Mode::NETASCII; mode < Mode::INVALID; mode = Mode(mode + 1))
         {
             if (strncasecmp(toString(mode), mode_str, max_size) == 0)
@@ -107,12 +123,73 @@ namespace tftp
         // Parse options
         while ((pos - data) < static_cast<ssize_t>(size))
         {
-            if (extractOption(request, pos) == true)
+            if (extractOption(data, size, request, pos) == true)
             {
                 continue;
             }
 
-            pos += entryLen(); // unknown option -> skip
+            pos += entryLen(data, size, pos); // unknown option -> skip
+        }
+
+        return 0;
+    }
+
+
+    std::vector<char> forgeRequest(Request const& request)
+    {
+        std::vector<char> buffer;
+        buffer.reserve(512);    // max size of request packet
+
+        // write opcode
+        uint16_t const opcode = hton(request.operation);
+        insert(buffer, opcode);
+
+        // write filename
+        insert(buffer, request.filename);
+
+        // write mode
+        insert(buffer, toString(request.mode));
+
+        // write options
+        for (auto const& option : request.supported_options)
+        {
+            insert(buffer, option->name);
+            insert(buffer, std::to_string(option->value));
+        }
+
+        return buffer;
+    }
+
+
+    int parseOptionAck(char const* data, size_t size, Request& request)
+    {
+        if ((size < 4) or (size > 512)) // min request size is 4 -> opcode (2) + optname 0 (1) + optvalue 0 (1)
+        {
+            errno = EMSGSIZE;
+            return -1;
+        }
+        char const* pos = data;
+
+        request.operation = hton(*reinterpret_cast<uint16_t const*>(pos));
+        if (request.operation != opcode::OACK)
+        {
+            // Cannot continue parsing this network packet
+            errno = EPROTO;
+            return -1;
+        }
+        pos += 2;
+
+        // Parse options
+        while ((pos - data) < static_cast<ssize_t>(size))
+        {
+            if (extractOption(data, size, request, pos) == true)
+            {
+                continue;
+            }
+
+            // Unknown option: it shall never happens since server shall only respond with client requested options
+            errno = EPROTO;
+            return -1;
         }
 
         return 0;
@@ -122,7 +199,7 @@ namespace tftp
     std::vector<char> forgeOptionAck(Request const& request)
     {
         std::vector<char> buffer;
-        buffer.reserve(512);    // max size of request packet: oack cannot be bigger
+        buffer.reserve(512);    // max size of packet: oack cannot be bigger
 
         // write opcode
         uint16_t const opcode = hton(opcode::OACK);
@@ -151,11 +228,11 @@ namespace tftp
 
     bool isLastDataPacket(size_t size, Request const& request)
     {
-        return ((size - 4) < request.block_size.value);
+        return ((size - 4) < static_cast<size_t>(request.block_size.value));
     }
 
 
-    int parseData(char const* data, size_t size, std::ostream& output)
+    int parseData(char const* data, size_t size)
     {
         char const* pos = data;
 
@@ -176,8 +253,6 @@ namespace tftp
         uint16_t const block_id = hton(*reinterpret_cast<uint16_t const*>(pos));
         pos += 2;
 
-        // TODO handle netascii
-        output.write(pos, size - 4);
         return static_cast<int>(block_id);
     }
 
@@ -195,7 +270,7 @@ namespace tftp
         // write block id
         uint16_t const block_id = hton(static_cast<uint16_t>(block));
         insert(buffer, block_id);
-        
+
         // write data
         buffer.resize(max_size);
         input.read(buffer.data() + 4, request.block_size.value);
@@ -270,7 +345,7 @@ namespace tftp
         return buffer;
     }
 
-    //TODO: 
+    //TODO:
     // 1. use an absolute block id on top of rolling block id (uint16_t in the protocol)
     // 2. use absolute block id to set the file cursor at the right place to handle errors
     void processRead(Request const& request, AbstractSocket& socket, std::istream& file)
@@ -302,12 +377,17 @@ namespace tftp
         {
             int retry = 0;
             int window_block = 1;
+            int absolute_block = 1;
             while (not isTransferFinish)
             {
                 if (retry > MAX_RETRY)
                 {
                     throw std::system_error(EIO, std::generic_category());
                 }
+
+                // Set file read cursor on absolute block position (so that acked block is always synced with file cursor position)
+                // -1 because the first index is 1, not 0
+                file.seekg((absolute_block - 1) * request.block_size.value);
 
                 int ret = writeData(window_block);
                 if (ret < 0)
@@ -330,18 +410,22 @@ namespace tftp
                 {
                     throw std::system_error(errno, std::generic_category());
                 }
-                window_block = ack_block + 1;
+                uint16_t sent_blocks = ack_block + 1 - window_block;
+                absolute_block += sent_blocks;
+                window_block = ack_block + 1; // next block to send
             }
+            printf("sent %d blocks\n", absolute_block);
         }
         catch(std::system_error& e)
         {
             auto reply = tftp::forgeError(e.code().value());
             socket.write(reply);
+            printf("error: %s\n", e.what());
         }
     }
 
 
-    //TODO: 
+    //TODO:
     // 1. use an absolute block id on top of rolling block id (uint16_t in the protocol)
     // 2. use absolute block id to set the file cursor at the right place to handle errors
     void processWrite(Request const& request, AbstractSocket& socket, std::ostream& file)
@@ -350,10 +434,12 @@ namespace tftp
         packet.resize(request.block_size.value + 4);
 
         bool isTransferFinish = false;
-        auto readData = [&]()
+        auto readData = [&](int last_acked_block)
         {
+            uint16_t expected_block = last_acked_block + 1;
+            int last_written_block = last_acked_block;
             int block = 0;
-            for (uint32_t i = 0; i < request.window_size.value; ++i)
+            for (int32_t i = 0; i < request.window_size.value; ++i)
             {
                 int rec = socket.read(packet);
                 if (rec < 0)
@@ -361,11 +447,23 @@ namespace tftp
                     return -1;
                 }
 
-                block = tftp::parseData(packet.data(), rec, file);
+                block = tftp::parseData(packet.data(), rec);
                 if (block < 0)
                 {
                     throw std::system_error(errno, std::generic_category());
                 }
+
+                // Check that the block id is the one expected, if not skip it
+                if (expected_block != block)
+                {
+                    printf("DROP %d - expected: %d\n", block, expected_block);
+                    continue;
+                }
+
+                // TODO handle netascii
+                file.write(packet.data() + 4, rec - 4);
+                expected_block = block + 1;
+                last_written_block = block;
 
                 if (tftp::isLastDataPacket(rec, request))
                 {
@@ -373,12 +471,14 @@ namespace tftp
                     break;
                 }
             }
-            return block;
+
+            return last_written_block;
         };
 
         try
         {
             int retry = 0;
+            int last_acked_block = 0;
             while (not isTransferFinish)
             {
                 if (retry > MAX_RETRY)
@@ -386,7 +486,7 @@ namespace tftp
                     throw std::system_error(EIO, std::generic_category());
                 }
 
-                int block = readData();
+                int block = readData(last_acked_block);
                 if (block < 0)
                 {
                     ++retry;
@@ -399,14 +499,15 @@ namespace tftp
                     throw std::system_error(errno, std::generic_category());
                 }
 
-                // reset retry after every success
-                retry = 0;
+                last_acked_block = block;
+                retry = 0;  // reset retry after every success
             }
         }
         catch(std::system_error& e)
         {
             auto reply = tftp::forgeError(e.code().value());
             socket.write(reply);
+            printf("error: %s\n", e.what());
         }
     }
 }
