@@ -153,6 +153,11 @@ namespace tftp
         // write options
         for (auto const& option : request.supported_options)
         {
+            if (not option->is_enable)
+            {
+                continue;
+            }
+
             insert(buffer, option->name);
             insert(buffer, std::to_string(option->value));
         }

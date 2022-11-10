@@ -70,8 +70,8 @@ namespace tftp
         int64_t max;
         bool is_enable{false};
     };
-    constexpr Option BLKSIZE    = {"blksize",     512, 8, 8192       };
-    constexpr Option WINDOWSIZE = {"windowsize",  1,   1, 64         };
+    constexpr Option BLKSIZE    = {"blksize",     512, 8, 65464      };
+    constexpr Option WINDOWSIZE = {"windowsize",  1,   1, 65535      };
     constexpr Option TIMEOUT    = {"timeout",     1,   5, 255        };
     constexpr Option TSIZE      = {"tsize",       0,   0, INT64_MAX  };
 

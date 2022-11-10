@@ -10,12 +10,11 @@ set(LIB_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/src/protocol.cc
 )
 
-#if (UNIX)
-#  set(OS_LIB_SOURCES
-#    ${CMAKE_CURRENT_SOURCE_DIR}/src/OS/Linux/Socket.cc
-#    ${CMAKE_CURRENT_SOURCE_DIR}/src/OS/Linux/Time.cc
-#  )
-#endif()
+if (UNIX)
+  set(OS_LIB_SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/OS/Linux/Socket.cc
+  )
+endif()
 
 add_library(tftp ${LIB_SOURCES} ${OS_LIB_SOURCES})
 target_include_directories(tftp PUBLIC  ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -28,9 +27,19 @@ set_target_properties(tftp PROPERTIES
   COMPILE_FLAGS ${WARNINGS_FLAGS}
 )
 
-add_executable(test examples/main.cc)
-target_link_libraries(test tftp)
-set_target_properties(test PROPERTIES
+add_executable(server examples/server.cc)
+target_link_libraries(server tftp)
+set_target_properties(server PROPERTIES
+  CXX_STANDARD 17
+  CXX_STANDARD_REQUIRED YES
+  CXX_EXTENSIONS NO
+  POSITION_INDEPENDENT_CODE ON
+  COMPILE_FLAGS ${WARNINGS_FLAGS}
+)
+
+add_executable(client examples/client.cc)
+target_link_libraries(client tftp)
+set_target_properties(client PROPERTIES
   CXX_STANDARD 17
   CXX_STANDARD_REQUIRED YES
   CXX_EXTENSIONS NO
@@ -47,7 +56,7 @@ set_target_properties(test PROPERTIES
 #endif()
 
 #if (GTest_FOUND)
-#  add_executable(kickcat_unit unit/protocol-t.cc
+#  add_executable(tftp_unit unit/protocol-t.cc
 #  )
 #
 #  target_link_libraries(tftp_unit tftp GTest::gmock_main)
