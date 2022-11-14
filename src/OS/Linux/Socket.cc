@@ -108,4 +108,10 @@ namespace tftp
         printf("Creating a new socket to communicate with %s : %d\n", str, s.target_client_.sin6_port);
         return s;
     }
+
+
+    void Socket::switchToLast()
+    {
+        target_client_ = last_client_;
+    }
 }

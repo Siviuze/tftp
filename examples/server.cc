@@ -76,6 +76,7 @@ int main()
                 if (oack_ack != 0)
                 {
                     printf("Oops\n");
+                    continue; // Abort transfer
                 }
             }
             tftp::processRead(request, transferSocket, file);

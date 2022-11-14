@@ -175,8 +175,8 @@ namespace tftp
         }
         char const* pos = data;
 
-        request.operation = hton(*reinterpret_cast<uint16_t const*>(pos));
-        if (request.operation != opcode::OACK)
+        opcode operation = hton(*reinterpret_cast<opcode const*>(pos));
+        if (operation != opcode::OACK)
         {
             // Cannot continue parsing this network packet
             errno = EPROTO;

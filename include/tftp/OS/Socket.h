@@ -21,6 +21,7 @@ namespace tftp
 
         int bind(char const* address, char const* port);
         Socket createSocket();
+        void switchToLast();
 
 
     private:

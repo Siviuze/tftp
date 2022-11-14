@@ -85,7 +85,7 @@ namespace tftp
         Option window_size  {WINDOWSIZE};
         Option timeout      {TIMEOUT};
         Option transfer_size{TSIZE};
-        std::array<Option*, 4> supported_options = { &block_size, &window_size, &timeout, &transfer_size };
+        std::array<Option*, 4> supported_options = { &block_size, &window_size };
     };
 
     class AbstractSocket
