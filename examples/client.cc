@@ -60,6 +60,16 @@ int main(int argc, char* argv[])
     }
     socket.switchToLast();
 
+    if (tftp::getOpcode(packet.data(), packet.size()) == tftp::opcode::ERROR)
+    {
+        int code;
+        std::string msg;
+        tftp::parseError(packet.data(), packet.size(), code, msg);
+
+        printf("Error recevied from server: <%s>\n", msg.c_str());
+        return 2;
+    }
+
     // check OACK answer (if server can handles our options)
     if (tftp::parseOptionAck(packet.data(), rec, request) == 0)
     {

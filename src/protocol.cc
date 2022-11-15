@@ -83,6 +83,18 @@ namespace tftp
     }
 
 
+    opcode getOpcode(char const* data, size_t size)
+    {
+        if (size < 4)
+        {
+            // TFTP packet size cannot be less than 4
+            return opcode::ILLEGAL;
+        }
+
+        return hton(*reinterpret_cast<opcode const*>(data));
+    }
+
+
     int parseRequest(char const* data, size_t size, Request& request)
     {
         if ((size < 8) or (size > 512)) // min request size is 8 -> opcode (2) + filename 0 (1) + mode 'mail' (4) + mode 0 (1)
@@ -157,7 +169,6 @@ namespace tftp
             {
                 continue;
             }
-
             insert(buffer, option->name);
             insert(buffer, std::to_string(option->value));
         }
@@ -183,6 +194,13 @@ namespace tftp
             return -1;
         }
         pos += 2;
+
+        // Set all option to false/default to accept only the one the server sent to us
+        for (auto& option : request.supported_options)
+        {
+            option->is_enable = false;
+            option->value = option->default_value;
+        }
 
         // Parse options
         while ((pos - data) < static_cast<ssize_t>(size))
@@ -329,6 +347,31 @@ namespace tftp
     }
 
 
+    int parseError(char const* data, size_t size, int& code, std::string& error_string)
+    {
+        char const* pos = data;
+
+        // check opcode
+        uint16_t const operation = hton(*reinterpret_cast<uint16_t const*>(pos));
+        if (operation != opcode::ERROR)
+        {
+            errno = EPROTO;
+            return -1;
+        }
+        pos += 2;
+
+        // extract error code
+        code = hton(*reinterpret_cast<uint16_t const*>(pos));
+        pos += 2;
+
+        // extract error string
+        std::size_t len = entryLen(data, size, pos);
+        error_string = std::string(pos, len);
+
+        return 0;
+    }
+
+
     std::vector<char> forgeError(int code)
     {
         std::vector<char> buffer;
@@ -350,9 +393,7 @@ namespace tftp
         return buffer;
     }
 
-    //TODO:
-    // 1. use an absolute block id on top of rolling block id (uint16_t in the protocol)
-    // 2. use absolute block id to set the file cursor at the right place to handle errors
+
     void processRead(Request const& request, AbstractSocket& socket, std::istream& file)
     {
         bool isTransferFinish = false;
@@ -430,9 +471,6 @@ namespace tftp
     }
 
 
-    //TODO:
-    // 1. use an absolute block id on top of rolling block id (uint16_t in the protocol)
-    // 2. use absolute block id to set the file cursor at the right place to handle errors
     void processWrite(Request const& request, AbstractSocket& socket, std::ostream& file)
     {
         std::vector<char> packet;

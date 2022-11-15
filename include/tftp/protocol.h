@@ -66,14 +66,15 @@ namespace tftp
     {
         char const* name;
         int64_t value;
+        int64_t const default_value;
         int64_t min;
         int64_t max;
         bool is_enable{false};
     };
-    constexpr Option BLKSIZE    = {"blksize",     512, 8, 65464      };
-    constexpr Option WINDOWSIZE = {"windowsize",  1,   1, 65535      };
-    constexpr Option TIMEOUT    = {"timeout",     1,   5, 255        };
-    constexpr Option TSIZE      = {"tsize",       0,   0, INT64_MAX  };
+    constexpr Option BLKSIZE    = {"blksize",     512, 512, 8, 65464      };
+    constexpr Option WINDOWSIZE = {"windowsize",  1,     1, 1, 65535      };
+    constexpr Option TIMEOUT    = {"timeout",     1,     1, 5, 255        };
+    constexpr Option TSIZE      = {"tsize",       0,     0, 0, INT64_MAX  };
 
     struct Request
     {
@@ -85,7 +86,7 @@ namespace tftp
         Option window_size  {WINDOWSIZE};
         Option timeout      {TIMEOUT};
         Option transfer_size{TSIZE};
-        std::array<Option*, 4> supported_options = { &block_size, &window_size };
+        std::array<Option*, 2> supported_options = { &block_size, &window_size };
     };
 
     class AbstractSocket
@@ -141,6 +142,8 @@ namespace tftp
     bool extractOption(char const* data, size_t size, Request& req, char const*& position);
 
     // Protocol management
+    opcode getOpcode(char const* data, size_t size);
+
     int parseRequest(char const* data, size_t size, Request& request);
     std::vector<char> forgeRequest(Request const& request);
 
