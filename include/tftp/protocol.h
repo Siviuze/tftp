@@ -5,8 +5,6 @@
 #include <vector>
 #include <array>
 #include <string>
-#include <cstring>
-#include <charconv>
 #include <iostream>
 
 namespace tftp
@@ -23,6 +21,42 @@ namespace tftp
         OACK    = 6,  // Option Acknowledgment
         ILLEGAL
     };
+
+    enum error_code : uint16_t
+    {
+        CUSTOM              = 0,
+        FILE_NOT_FOUND      = 1,
+        ACCESS_VIOLATION    = 2,
+        NO_MEMORY           = 3,
+        ILLEGAL_OPERATION   = 4,
+        UNKNOWN_ID          = 5,
+        FILE_EXIST          = 6,
+        UNKNOWN_USER        = 7,
+        NEGOTIATION_FAILURE = 8,
+
+        // Custom codes (to be sent through CUSTOM code)
+        CUSTOM_CODE_SECTION = 0x100,
+        RETRY_EXCEEDED      = 0x101,
+        IO                  = 0x102,
+        SOCKET_UNUSABLE     = 0x103
+    };
+    constexpr char const* toString(enum error_code code)
+    {
+        switch (code)
+        {
+            case FILE_NOT_FOUND:        { return "File not found";                   }
+            case ACCESS_VIOLATION:      { return "Access violation";                 }
+            case NO_MEMORY:             { return "Disk full or allocaiton exceeded"; }
+            case ILLEGAL_OPERATION:     { return "Illegal TFTP operation";           }
+            case UNKNOWN_ID:            { return "Unknown transfer ID";              }
+            case FILE_EXIST:            { return "File already exists";              }
+            case NEGOTIATION_FAILURE:   { return "Option negotiation failure";       }
+            case RETRY_EXCEEDED:        { return "Retry exceeded";                   }
+            case IO:                    { return "I/O error";                        }
+            case SOCKET_UNUSABLE:       { return "Socket unusable";                  }
+            default:                    { return "unknown";                          }
+        }
+    }
 
     enum Mode
     {
@@ -41,26 +75,6 @@ namespace tftp
             default:         { return "unknown";  }
         }
     }
-
-    constexpr uint16_t errnoToTftp(int code)
-    {
-        switch (code)
-        {
-            case ENOENT: { return 1; }
-            case EACCES: { return 2; }
-            case ENOMEM: { return 3; }
-            case EPROTO: { return 4; }
-            case EPERM:  { return 5; }
-            case EEXIST: { return 6; }
-            case EUSERS: { return 7; } // change the meaning of errno USERS
-            case EBADE:  { return 8; } // Option negotiation failure
-            default:
-            {
-                return 0; // no equivalence
-            }
-        }
-    }
-    char const* errnoToString(int code);
 
     struct Option
     {
@@ -92,10 +106,6 @@ namespace tftp
     class AbstractSocket
     {
     public:
-        virtual void setTimeout(std::chrono::seconds timeout) = 0;
-        virtual int read(void* data, size_t size) = 0;
-        virtual int write(void const* data, size_t size) = 0;
-
         int read(std::vector<char>& packet)
         {
             return read(packet.data(), packet.size());
@@ -105,6 +115,10 @@ namespace tftp
         {
             return write(packet.data(), packet.size());
         }
+
+        virtual void setTimeout(std::chrono::seconds timeout) = 0;
+        virtual int read(void* data, size_t size) = 0;
+        virtual int write(void const* data, size_t size) = 0;
     };
 
 
@@ -157,8 +171,8 @@ namespace tftp
     int parseAck(char const* data, size_t size);
     std::vector<char> forgeAck(int block_number);
 
-    int parseError(char const* data, size_t size, int& code, std::string& error_string);
-    std::vector<char> forgeError(int code);
+    int parseError(char const* data, size_t size, enum error_code& code, std::string& error_string);
+    std::vector<char> forgeError(enum error_code code);
 
     // read and writes functions that can be used for both server and client
     void processRead(Request const& request, AbstractSocket& socket, std::istream& file);

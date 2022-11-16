@@ -1,28 +1,10 @@
 #include "protocol.h"
 
 #include <functional>
+#include <cstring>
 
 namespace tftp
 {
-    char const* errnoToString(int code)
-    {
-        switch (code)
-        {
-            case ENOENT: { return "File not found.";                    }
-            case EACCES: { return "Access violation.";                  }
-            case ENOMEM: { return "Disk full or allocation exceeded.";  }
-            case EPROTO: { return "Illegal TFTP operation.";            }
-            case EPERM:  { return "Unknown transfer ID.";               }
-            case EEXIST: { return "File already exists.";               }
-            case EUSERS: { return "No such user.";                      }
-            default:
-            {
-                return strerror(code);
-            }
-        }
-    }
-
-
     template<> void insert<char const*>(std::vector<char>& buffer, char const*const& str)
     {
         char const* data_begin = str;
@@ -59,20 +41,20 @@ namespace tftp
 
     bool extractOption(char const* data, size_t size, Request& req, char const*& position)
     {
+        auto cmp = [](unsigned char a, unsigned char b)
+        {
+            return std::tolower(a) == std::tolower(b);
+        };
+
         for (auto option : req.supported_options)
         {
-            if (strncasecmp(option->name, position, maxSize(data, size, position)) == 0)
+            if (std::equal(position, position + entryLen(data, size, position), option->name, cmp))
             {
                 position += entryLen(data, size, position);
 
                 size_t len = entryLen(data, size, position);
-                auto result = std::from_chars(position, position + len, option->value);
+                option->value = strtol(position, nullptr, 10);
                 position += len;
-
-                if (result.ec != std::errc())
-                {
-                    return false;
-                }
 
                 option->value = std::clamp(option->value, option->min, option->max);
                 option->is_enable = true;
@@ -100,8 +82,7 @@ namespace tftp
         if ((size < 8) or (size > 512)) // min request size is 8 -> opcode (2) + filename 0 (1) + mode 'mail' (4) + mode 0 (1)
         {
             request.operation = opcode::ILLEGAL;
-            errno = EMSGSIZE;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
         char const* pos = data;
 
@@ -109,8 +90,7 @@ namespace tftp
         if ((request.operation != opcode::RRQ) and (request.operation != opcode::WRQ))
         {
             // Cannot continue parsing this network packet
-            errno = EPROTO;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
         pos += 2;
 
@@ -181,8 +161,7 @@ namespace tftp
     {
         if ((size < 4) or (size > 512)) // min request size is 4 -> opcode (2) + optname 0 (1) + optvalue 0 (1)
         {
-            errno = EMSGSIZE;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
         char const* pos = data;
 
@@ -190,8 +169,7 @@ namespace tftp
         if (operation != opcode::OACK)
         {
             // Cannot continue parsing this network packet
-            errno = EPROTO;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
         pos += 2;
 
@@ -211,8 +189,7 @@ namespace tftp
             }
 
             // Unknown option: it shall never happens since server shall only respond with client requested options
-            errno = EPROTO;
-            return -1;
+            return -error_code::NEGOTIATION_FAILURE;
         }
 
         return 0;
@@ -261,15 +238,13 @@ namespace tftp
 
         if (size < 4)
         {
-            errno = EMSGSIZE;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
 
         uint16_t const operation = hton(*reinterpret_cast<uint16_t const*>(pos));
         if (operation != opcode::DATA)
         {
-            errno = EPROTO;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
         pos += 2;
 
@@ -313,15 +288,13 @@ namespace tftp
 
         if (size != 4)
         {
-            errno = EMSGSIZE;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
 
         uint16_t const operation = hton(*reinterpret_cast<uint16_t const*>(pos));
         if (operation != opcode::ACK)
         {
-            errno = EPROTO;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
         pos += 2;
 
@@ -347,7 +320,7 @@ namespace tftp
     }
 
 
-    int parseError(char const* data, size_t size, int& code, std::string& error_string)
+    int parseError(char const* data, size_t size, enum error_code& code, std::string& error_string)
     {
         char const* pos = data;
 
@@ -355,13 +328,12 @@ namespace tftp
         uint16_t const operation = hton(*reinterpret_cast<uint16_t const*>(pos));
         if (operation != opcode::ERROR)
         {
-            errno = EPROTO;
-            return -1;
+            return -error_code::ILLEGAL_OPERATION;
         }
         pos += 2;
 
         // extract error code
-        code = hton(*reinterpret_cast<uint16_t const*>(pos));
+        code = error_code(hton(*reinterpret_cast<uint16_t const*>(pos)));
         pos += 2;
 
         // extract error string
@@ -372,7 +344,7 @@ namespace tftp
     }
 
 
-    std::vector<char> forgeError(int code)
+    std::vector<char> forgeError(enum error_code code)
     {
         std::vector<char> buffer;
         buffer.reserve(512);
@@ -381,12 +353,18 @@ namespace tftp
         uint16_t const opcode = hton(opcode::ERROR);
         insert(buffer, opcode);
 
+        error_code sent_code = code;
+        if (sent_code >= error_code::CUSTOM_CODE_SECTION)
+        {
+            sent_code = error_code::CUSTOM;
+        }
+
         // write error code
-        uint16_t const errorCode = hton(errnoToTftp(code));
+        uint16_t const errorCode = hton(sent_code);
         insert(buffer, errorCode);
 
         // write message
-        char const* message = errnoToString(code);
+        char const* message = toString(code);
         insert(buffer, message);
 
         // done
@@ -428,7 +406,7 @@ namespace tftp
             {
                 if (retry > MAX_RETRY)
                 {
-                    throw std::system_error(EIO, std::generic_category());
+                    throw error_code::RETRY_EXCEEDED;
                 }
 
                 // Set file read cursor on absolute block position (so that acked block is always synced with file cursor position)
@@ -442,31 +420,43 @@ namespace tftp
                     continue;
                 }
 
-                std::vector<char> ack;
-                ack.resize(4);
-                if (socket.read(ack) < 0)
+                std::vector<char> packet;
+                packet.resize(512);
+                int rec = socket.read(packet);
+                if (rec < 0)
                 {
                     ++retry;
                     isTransferFinish = false;
                     continue;
                 }
 
-                int ack_block = parseAck(ack.data(), ack.size());
+                if (getOpcode(packet.data(), rec) == opcode::ERROR)
+                {
+                    error_code code;
+                    std::string msg;
+                    parseError(packet.data(), rec, code, msg);
+                    throw msg;
+                }
+
+                int ack_block = parseAck(packet.data(), rec);
                 if (ack_block < 0)
                 {
-                    throw std::system_error(errno, std::generic_category());
+                    throw error_code(-ack_block);
                 }
                 uint16_t sent_blocks = ack_block + 1 - window_block;
                 absolute_block += sent_blocks;
                 window_block = ack_block + 1; // next block to send
             }
-            printf("sent %d blocks\n", absolute_block);
         }
-        catch(std::system_error& e)
+        catch(enum error_code const& e)
         {
-            auto reply = tftp::forgeError(e.code().value());
+            auto reply = tftp::forgeError(e);
             socket.write(reply);
-            printf("error: %s\n", e.what());
+            printf("error: %s\n", toString(e));
+        }
+        catch(std::string const& e)
+        {
+            printf("rec error: %s\n", e.c_str());
         }
     }
 
@@ -490,10 +480,18 @@ namespace tftp
                     return -1;
                 }
 
+                if (getOpcode(packet.data(), rec) == opcode::ERROR)
+                {
+                    error_code code;
+                    std::string msg;
+                    parseError(packet.data(), rec, code, msg);
+                    throw msg;
+                }
+
                 block = tftp::parseData(packet.data(), rec);
                 if (block < 0)
                 {
-                    throw std::system_error(errno, std::generic_category());
+                    throw error_code(-block);
                 }
 
                 // Check that the block id is the one expected, if not skip it
@@ -526,7 +524,7 @@ namespace tftp
             {
                 if (retry > MAX_RETRY)
                 {
-                    throw std::system_error(EIO, std::generic_category());
+                    throw error_code::RETRY_EXCEEDED;
                 }
 
                 int block = readData(last_acked_block);
@@ -539,18 +537,22 @@ namespace tftp
                 std::vector<char> reply = tftp::forgeAck(block);
                 if (socket.write(reply) < 0)
                 {
-                    throw std::system_error(errno, std::generic_category());
+                    throw error_code::IO;
                 }
 
                 last_acked_block = block;
                 retry = 0;  // reset retry after every success
             }
         }
-        catch(std::system_error& e)
+        catch(enum error_code const& e)
         {
-            auto reply = tftp::forgeError(e.code().value());
+            auto reply = tftp::forgeError(e);
             socket.write(reply);
-            printf("error: %s\n", e.what());
+            printf("error: %s\n", toString(e));
+        }
+        catch(std::string const& e)
+        {
+            printf("rec error: %s\n", e.c_str());
         }
     }
 }

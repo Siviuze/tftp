@@ -1,5 +1,6 @@
 #include <fstream>
 #include <filesystem>
+#include <cstring>
 
 #include "tftp/protocol.h"
 #include "tftp/OS/Socket.h"
@@ -45,14 +46,14 @@ int main(int argc, char* argv[])
     request.block_size.is_enable = true;
 
     std::vector<char> packet = forgeRequest(request);
-    if (socket.write(packet.data(), packet.size()) < 0)
+    if (socket.write(packet) < 0)
     {
         perror("write request");
         return -1;
     }
 
     packet.resize(512);
-    int rec = socket.read(packet.data(), packet.size());
+    int rec = socket.read(packet);
     if (rec < 0)
     {
         perror("read request reply");
@@ -62,7 +63,7 @@ int main(int argc, char* argv[])
 
     if (tftp::getOpcode(packet.data(), packet.size()) == tftp::opcode::ERROR)
     {
-        int code;
+        tftp::error_code code;
         std::string msg;
         tftp::parseError(packet.data(), packet.size(), code, msg);
 
@@ -76,7 +77,7 @@ int main(int argc, char* argv[])
         if (request.operation == tftp::opcode::RRQ)
         {
             packet = tftp::forgeAck(0);
-            if (socket.write(packet.data(), packet.size()) < 0)
+            if (socket.write(packet) < 0)
             {
                 perror("write request");
                 return -1;

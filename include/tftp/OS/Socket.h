@@ -8,7 +8,7 @@
 
 namespace tftp
 {
-    class Socket final : public tftp::AbstractSocket
+    class Socket final : public AbstractSocket
     {
     public:
         Socket();
@@ -23,6 +23,8 @@ namespace tftp
         Socket createSocket();
         void switchToLast();
 
+        using AbstractSocket::read;
+        using AbstractSocket::write;
 
     private:
         int fd_;

@@ -1,5 +1,6 @@
 #include <netdb.h>
 #include <unistd.h>
+#include <cstring>
 
 #include "OS/Socket.h"
 
@@ -12,7 +13,7 @@ namespace tftp
         fd_ = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
         if (fd_ < 0)
         {
-            throw std::system_error(errno, std::generic_category());
+            throw error_code::SOCKET_UNUSABLE;
         }
     }
 
@@ -40,7 +41,7 @@ namespace tftp
         posix_timeout.tv_usec = 0;
         if (setsockopt (fd_, SOL_SOCKET, SO_RCVTIMEO, &posix_timeout, sizeof(struct timeval)) < 0)
         {
-            throw std::system_error(errno, std::generic_category());
+            throw error_code::SOCKET_UNUSABLE;
         }
     }
 

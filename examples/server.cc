@@ -1,6 +1,7 @@
 #include <sys/stat.h>
 
 #include <fstream>
+#include <cstring>
 
 #include "tftp/protocol.h"
 #include "tftp/OS/Socket.h"
@@ -58,7 +59,7 @@ int main()
             {
                 reply = tftp::forgeAck(0);
             }
-            transferSocket.write(reply.data(), reply.size());
+            transferSocket.write(reply);
             tftp::processWrite(request, transferSocket, file);
         }
         else
@@ -67,7 +68,7 @@ int main()
             if (reply.size() != 0)
             {
                 // send OACK
-                transferSocket.write(reply.data(), reply.size());
+                transferSocket.write(reply);
 
                 // wait for OACK ack (0)
                 char ack[4];
